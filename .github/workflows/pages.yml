@@ -1,0 +1,187 @@
+name: Verify and deploy course portal
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  prepare-source:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - name: Restore reviewed source on first browser upload only
+        id: source
+        shell: bash
+        env:
+          SOURCE_ARCHIVE_SHA256: 0f6faa815dda827865b55cd612c9bd0ea4832eae2e7c77cf0461391cd36d23a0
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path, PurePosixPath
+          import stat
+          import subprocess
+          import zipfile
+
+          root = Path.cwd().resolve()
+
+          def git(*args):
+              return subprocess.check_output(['git', *args], cwd=root, text=True).strip()
+
+          def fail(message):
+              raise SystemExit(message)
+
+          def finish(commit):
+              with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+                  output.write(f'commit={commit}\n')
+
+          initial_commit = git('rev-parse', 'HEAD')
+          if initial_commit != os.environ['GITHUB_SHA']:
+              fail('Checkout does not match the triggering commit.')
+          if (root / 'package.json').is_file():
+              # Ordinary deployments never read or reapply the bootstrap archive.
+              finish(initial_commit)
+              raise SystemExit(0)
+          if git('status', '--porcelain'):
+              fail('Bootstrap requires a clean checkout.')
+          archive_path = root / 'source.zip'
+          if not archive_path.is_file() or archive_path.is_symlink():
+              fail('Upload the reviewed source.zip before running this workflow.')
+          if hashlib.sha256(archive_path.read_bytes()).hexdigest() != os.environ['SOURCE_ARCHIVE_SHA256']:
+              fail('Source archive SHA-256 does not match the reviewed archive.')
+
+          blocked_parts = {
+              '.git', '.github', '.local', '.supabase', 'node_modules',
+              'private-materials', 'dist', 'test-results', 'playwright-report',
+              '__pycache__',
+          }
+          blocked_extensions = {
+              '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx',
+              '.mp3', '.mp4', '.wav', '.m4a', '.mov', '.zip', '.7z', '.rar',
+              '.key', '.pem', '.p12', '.pfx', '.log', '.pyc', '.tsbuildinfo',
+          }
+          reviewed = []
+          seen = set()
+          with zipfile.ZipFile(archive_path) as archive:
+              entries = archive.infolist()
+              if not entries or len(entries) > 500 or sum(item.file_size for item in entries) > 50 * 1024 * 1024:
+                  fail('Archive exceeds bootstrap size limits.')
+              for item in entries:
+                  name = item.filename
+                  if '\\' in name or ':' in name or '\x00' in name or not name.startswith('portal/'):
+                      fail(f'Invalid archive path: {name!r}')
+                  raw_parts = name.split('/')
+                  if len(raw_parts) < 2 or any(part in ('', '.', '..') for part in raw_parts):
+                      fail(f'Invalid archive path: {name!r}')
+                  relative = PurePosixPath(*raw_parts[1:])
+                  parts = relative.parts
+                  lower_parts = [part.lower() for part in parts]
+                  if any(part in blocked_parts for part in lower_parts):
+                      fail(f'Private or workflow path cannot be extracted: {relative}')
+                  if any(part.startswith('.env') for part in lower_parts) and str(relative) != '.env.example':
+                      fail(f'Environment file cannot be extracted: {relative}')
+                  if relative.suffix.lower() in blocked_extensions:
+                      fail(f'Course material or sensitive file cannot be extracted: {relative}')
+                  mode = item.external_attr >> 16
+                  if item.is_dir() or stat.S_IFMT(mode) not in (0, stat.S_IFREG):
+                      fail(f'Only regular source files are allowed: {relative}')
+                  if item.flag_bits & 1:
+                      fail('Encrypted archives are not supported.')
+                  normalized = str(relative).casefold()
+                  if normalized in seen:
+                      fail(f'Duplicate archive path: {relative}')
+                  seen.add(normalized)
+                  target = root.joinpath(*parts)
+                  if not target.resolve().is_relative_to(root):
+                      fail(f'Archive path escapes the checkout: {relative}')
+                  if target.exists() or target.is_symlink():
+                      fail(f'Bootstrap never overwrites an existing file: {relative}')
+                  if any(parent.is_symlink() for parent in target.parents if parent != root):
+                      fail(f'Archive path contains a symbolic link: {relative}')
+                  reviewed.append((item, target, str(relative)))
+              if not {'package.json', 'package-lock.json', 'src/main.tsx'}.issubset(seen):
+                  fail('Archive is missing required application source files.')
+              # Validate the whole archive before writing any source file.
+              for item, target, relative in reviewed:
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  with target.open('xb') as output:
+                      output.write(archive.read(item))
+
+          paths = [relative for _, _, relative in reviewed]
+          subprocess.run(['git', 'add', '--', *paths], cwd=root, check=True)
+          staged = set(subprocess.check_output(['git', 'diff', '--cached', '--name-only', '-z'], cwd=root).decode().rstrip('\0').split('\0'))
+          if staged != set(paths) or any(path.startswith('.github/') for path in staged):
+              fail('Staged changes differ from the reviewed source files.')
+          git('config', 'user.name', 'github-actions[bot]')
+          git('config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com')
+          git('commit', '-m', 'Restore reviewed course portal source from browser upload')
+          commit = git('rev-parse', 'HEAD')
+          # This fast-forward push fails safely if main has moved in the meantime.
+          subprocess.run(['git', 'push', 'origin', 'HEAD:refs/heads/main'], cwd=root, check=True)
+          finish(commit)
+          print(f'Restored {len(paths)} reviewed source files at {commit}.')
+          PY
+  verify:
+    needs: prepare-source
+    if: always() && !cancelled() && (needs.prepare-source.result == 'success' || needs.prepare-source.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare-source.outputs.commit || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: node tests/sql/run-security.mjs
+      - name: Verify deployment connection
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: node scripts/validate-web-config.mjs --required
+        env:
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+      - name: Build production site
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+          VITE_BASE_PATH: /${{ github.event.repository.name }}/
+      - run: node scripts/assert-public-build.mjs
+      - uses: actions/configure-pages@v5
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+      - uses: actions/upload-pages-artifact@v4
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        with:
+          path: dist
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment
