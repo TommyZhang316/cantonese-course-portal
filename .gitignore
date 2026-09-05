@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+.local/
+private-materials/
+test-results/
+playwright-report/
+.supabase/
+*.log
+*.tsbuildinfo
+__pycache__/
+*.pyc
