@@ -1,5 +1,13 @@
 # GitHub 與 Supabase 部署
 
+## 本課程正式部署狀態（2026年9月6日）
+
+網站已發布：[公益粵語課堂](https://tommyzhang316.github.io/cantonese-course-portal/)。程式庫：[cantonese-course-portal](https://github.com/TommyZhang316/cantonese-course-portal)。首次完整發布通過[GitHub Actions驗證及部署](https://github.com/TommyZhang316/cantonese-course-portal/actions/runs/33985131739)。
+
+Supabase已建立8課並匯入52份私人材料，26份定時、23份僅教職員、3份即時。正式網站回跳網址及密碼重設網址已保存，保留電郵驗證，密碼下限12字元。首次瀏覽器匯入用的程式碼寫入權限已從後續工作流程移除。
+
+**尚待負責人完成：第一位管理員註冊及電郵驗證，以及正式SMTP設定與收信測試。** 這些完成前不應通知全班開始註冊。部署成功不代表全班的驗證電郵已可送達。最新測試證據與限制見[VERIFICATION.md](VERIFICATION.md)。
+
 這份部署需要GitHub儲存庫寫入權限及一個由課程負責人管理的Supabase專案。電郵地址本身不是授權憑證。以下步驟不購買方案；如果服務要求升級或付款，先由負責人決定。
 
 ## 1 準備專案
@@ -58,6 +66,6 @@ Settings → Pages的Source選GitHub Actions。工作流程會先檢查型別、
 - 同時用兩個管理員修改同一項資源，第二次存檔應提示版本衝突。最後一位管理員不能停用或降權自己。
 - 用手機和鍵盤完成登入、找材料和管理表單。
 
-本機PGlite安全測試不替代真實Auth/Storage HTTP驗收或双連線競態測試。正式網址、專案與SMTP尚未連接前，網站仍處於可部署階段。
+本機PGlite安全測試不替代真實Auth/Storage HTTP驗收或雙連線競態測試。網站發布、材料匯入、管理員啟用與寄信驗收是不同項目，應逐項確認後才對全班開放註冊。
 
 官方參考：[GitHub Pages工作流程](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)、[Supabase Storage權限](https://supabase.com/docs/guides/storage/security/access-control)、[Supabase SMTP](https://supabase.com/docs/guides/auth/auth-smtp)。
