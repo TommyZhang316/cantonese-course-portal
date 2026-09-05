@@ -2,6 +2,8 @@
 
 本網站提供學生、老師、管理員三種帳戶，管理課程材料、每課日期和定時發布。GitHub Pages承載前端；Supabase承載登入、資料庫及私人檔案。網站不使用OpenAI的網域。
 
+正式入口：[公益粵語課堂](https://tommyzhang316.github.io/cantonese-course-portal/)。師生操作見[入口使用指南](docs/USAGE.md)。首次對外啟用前，管理員須確認驗證郵件可送達及帳戶審批正常，見[部署驗收](docs/DEPLOY.md)。
+
 ## 已實作
 
 - 電郵與密碼登入、申請帳戶、電郵驗證、忘記／重設密碼。
