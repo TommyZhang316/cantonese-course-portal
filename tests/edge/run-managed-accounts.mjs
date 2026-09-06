@@ -24,6 +24,7 @@ function adapter(overrides = {}) {
     async profile(id) { calls.push(['profile', id]); return { id, role: 'admin', status: 'approved', must_change_password: false }; },
     async find(username) { calls.push(['find', username]); return accounts.get(username) || null; },
     async create(value, createdBy, password) { calls.push(['create', value, createdBy, password]); accounts.set(value.username, { id: accountId }); return { id: accountId }; },
+    async finalize(username, createdBy) { calls.push(['finalize', username, createdBy]); return { id: accountId, provisioned: true }; },
     async beginReset(id, version) { calls.push(['begin', id, version]); return { ...student, id, version: version + 1, reset_token: resetToken }; },
     async resetPassword(id, password) { calls.push(['password', id, password]); return true; },
     async finishReset(reset, succeeded) { calls.push(['finish', reset, succeeded]); return true; },
@@ -96,6 +97,7 @@ try {
     assert.equal(response.headers.get('cache-control'), 'no-store');
     assert.deepEqual(await response.json(), { results: [{ ...student, id: accountId, status: 'created' }] });
     assert.deepEqual(deps.calls.find(call => call[0] === 'create'), ['create', student, actor, await initialPassword('LIWU')]);
+    assert.deepEqual(deps.calls.filter(call => ['create','finalize'].includes(call[0])).map(call => call[0]), ['create','finalize']);
   });
   await check('same-batch duplicates and repeated requests never reset passwords or alter existing users', async () => {
     const deps = adapter();
@@ -108,10 +110,27 @@ try {
   });
   await check('cross-request unique collisions report existing without converting create to a reset', async () => {
     let finds = 0;
-    const deps = adapter({ async find() { return ++finds === 1 ? null : { id: accountId }; }, async create() { return null; } });
+    const deps = adapter({ async find() { return ++finds === 1 ? null : { id: accountId }; }, async create() { return null; }, async finalize() { return { id: accountId, provisioned: false }; } });
     const response = await handleRequest(request(), deps);
     assert.equal((await response.json()).results[0].status, 'existing');
     assert.equal(deps.calls.some(call => call[0] === 'password'), false);
+  });
+  await check('successful provider creation is not reported ready before trusted profile finalization', async () => {
+    for (const finalize of [async () => null, async () => { throw new Error('PRIVATE_FINALIZER_ERROR'); }, async () => ({id: actor, provisioned:true})]) {
+      const deps = adapter({finalize});
+      const response = await handleRequest(request(), deps);
+      const output = await response.text();
+      assert.equal(JSON.parse(output).results[0].status, 'error');
+      assert.equal(output.includes('PRIVATE_FINALIZER_ERROR'),false);
+      assert.equal(deps.calls.some(call => call[0] === 'password'),false);
+    }
+  });
+  await check('retry after orphaned Auth creation finishes the profile without changing the provider password', async () => {
+    const deps = adapter({ async find() { return null; }, async create() { return null; } });
+    const response = await handleRequest(request(), deps);
+    assert.deepEqual(await response.json(), {results:[{...student,status:'created',id:accountId}]});
+    assert.deepEqual(deps.calls.find(call => call[0] === 'finalize'), ['finalize',student.username,actor]);
+    assert.equal(deps.calls.some(call => call[0] === 'password'),false);
   });
   await check('partial provider failures retain successful rows and never leak raw provider error details', async () => {
     const deps = adapter({ async create(value) { if (value.username === 'LIWU') throw new Error('PRIVATE_PROVIDER_ERROR secret_token'); return { id: accountId }; } });

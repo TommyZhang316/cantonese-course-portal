@@ -12,6 +12,8 @@ Coverage: anonymous denial; profile isolation; signup role spoofing; pending/sus
 
 The runner applies every migration in filename order, including the explicit trusted-import grant migration. Its test-only `service_role` has PostgreSQL `BYPASSRLS`, as on Supabase, and starts with simulated broad public-table defaults so narrowing is actually exercised.
 
+Managed-account regression coverage reproduces Auth's insertion order: insert provider metadata, then update custom app metadata and confirmation. The trusted finalizer must complete the untouched student profile before success is reported, without changing the provider password. Browser roles, forged user metadata, wrong creators, unconfirmed identities and edited pending profiles are rejected; repeated finalization preserves completed or suspended accounts. This uses PostgreSQL and a modeled provider sequence; actual hosted acceptance evidence is recorded separately in [VERIFICATION.md](../../docs/VERIFICATION.md).
+
 ## Run against a dedicated local Supabase
 
 For full API acceptance, use `supabase start`/`supabase db reset` with a current CLI/Storage image, create temporary test users through Auth, verify them in the local mail viewer, and make requests with their actual tokens using the Supabase JS client. Do not run the test adapter against Supabase. The operation-aware Storage helpers must exist; migration fails closed otherwise.

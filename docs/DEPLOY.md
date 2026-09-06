@@ -6,9 +6,9 @@
 
 Supabase已有8課及52份私人材料：26份定時、23份僅教職員、3份即時。首位管理員已完成電郵驗證並啟用。正式網站及密碼重設回跳網址已保存，首次瀏覽器匯入程式碼的寫入權限已從後續工作流程移除。
 
-**本次批量學生帳戶新版已發布，正式測試學生的建立、改密碼及重設驗收仍待批准。** [新版部署工作流程](https://github.com/TommyZhang316/cantonese-course-portal/actions/runs/34005929110)已成功；第三份遷移及`manage-accounts`已套用，雲端公開註冊已關閉，函式已使用內部登入及即時角色驗證。
+**批量學生帳戶已完成正式建立、首次改密碼、重名預覽、管理員重設及舊會話撤銷驗收。** [新版前端部署工作流程](https://github.com/TommyZhang316/cantonese-course-portal/actions/runs/34005929110)已成功；第三、第四份遷移及配套`manage-accounts`已套用，雲端公開註冊已關閉。兩個合成測試學生已按批准範圍清理。
 
-本機結果為27項單元測試、45項SQL情境、16項Edge Function測試及9次無障礙掃描。新版正式公開入口13項檢查通過、5次無障礙掃描零違規；匿名端點4項檢查通過。正式SMTP仍待專案負責人核對設定及完成收信測試，不能據此聲稱教職員重設郵件已可送達。學生帳戶建立及初始密碼重設不依賴SMTP。
+本機結果為27項單元測試、49項SQL情境、18項Edge Function測試及9次無障礙掃描。新版正式公開入口13項檢查通過、5次無障礙掃描零違規；匿名端點4項檢查通過，合成學生帳戶驗收及清理50項檢查通過。正式SMTP仍待完成教職員重設郵件的實際收信測試。學生帳戶建立及初始密碼重設不依賴SMTP。
 
 最新正式環境證據及限制見[VERIFICATION.md](VERIFICATION.md)。新版前端、資料庫及帳戶函式須配套部署；只發布GitHub Pages不足以啟用批量帳戶功能。
 
@@ -16,14 +16,17 @@ Supabase已有8課及52份私人材料：26份定時、23份僅教職員、3份�
 
 1. 使用本課程專用GitHub儲存庫，只提交`portal/`程式碼。教材、名單、帳戶CSV及私人設定留在本機或私人Storage。
 2. 在Supabase使用由課程負責人管理的獨立專案，記下Project URL及publishable／legacy anon key。這兩項可用於前端。
-3. 按檔名順序執行以下SQL；可使用Supabase CLI或SQL Dashboard。已有前兩份遷移的網站只需套用第三份，不要重複執行已套用的DDL。
+3. 按檔名順序執行以下SQL；可使用Supabase CLI或SQL Dashboard。只執行尚未套用的遷移，不要重複執行已套用的DDL。
    - `202609060001_portal.sql`
    - `202609060002_trusted_import_grants.sql`
    - `202609060003_managed_accounts.sql`
+   - `202609060004_finalize_managed_accounts.sql`
 4. 確認`course-materials` bucket為private；Data API不公開`portal_private`。
 5. 第三份遷移需要`extensions`中的pgcrypto、Auth的有效session記錄，以及Storage的operation-aware RLS。遇到相容性錯誤應修正服務設定，保留存取限制。
 
 第三份遷移加入拼音帳戶名稱、首次改密碼限制、學生密碼重設流程，以及以`auth.sessions`檢查登入是否仍有效。既有教職員電郵帳戶及課程材料保持。
+
+第四份遷移處理正式Auth先建立使用者、後寫入可信metadata的順序。帳戶服務取得Auth結果後，呼叫僅服務端可用的finalizer，核對身份及原建立管理員，再原子完成尚未處理的學生profile；不改Auth密碼。升級既有網站時先套用第四份遷移，再更新Edge Function。若先前建立停在待處理狀態，原建立管理員可重新提交同一批姓名，完成原帳戶；不必刪除重建或手動批准。
 
 ## 2 設定Auth及首位管理員
 

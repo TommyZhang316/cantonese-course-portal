@@ -16,6 +16,7 @@ type Dependencies = {
   profile(id: string): Promise<Profile | null>;
   find(username: string): Promise<{ id: string } | null>;
   create(student: Student, actorId: string, password: string): Promise<{ id: string } | null>;
+  finalize(username: string, actorId: string): Promise<{ id: string; provisioned: boolean } | null>;
   beginReset(id: string, version: number): Promise<Reset | null>;
   resetPassword(id: string, password: string): Promise<boolean>;
   finishReset(reset: Reset, succeeded: boolean): Promise<boolean>;
@@ -53,6 +54,11 @@ function defaultDependencies(token: string): Dependencies {
         app_metadata: { course_managed: true, course_username: student.username, course_created_by: actorId },
       });
       return error || !data.user ? null : { id: data.user.id };
+    },
+    async finalize(username, actorId) {
+      const { data, error } = await admin.rpc('service_finalize_managed_account', { p_username: username, p_actor_id: actorId });
+      if (error) throw new Error('Account finalization unavailable');
+      return data;
     },
     async beginReset(id, version) {
       const { data, error } = await caller.rpc('admin_begin_account_reset', { p_profile_id: id, p_expected_version: version });
@@ -162,14 +168,15 @@ export async function handleRequest(request: Request, suppliedDependencies?: Dep
             continue;
           }
           const created = await dependencies.create(student, actor, await initialPassword(student.username));
-          if (created) results.push({ ...student, status: 'created', id: created.id });
-          else {
-            // Unique Auth aliases and profile usernames settle cross-request
-            // collisions. Never convert a failed create into a password reset.
-            const concurrent = await dependencies.find(student.username);
-            results.push(concurrent
-              ? { ...student, status: 'existing', id: concurrent.id, message: '賬戶已存在，原有資料及密碼保持不變。' }
-              : { ...student, status: 'error', message: '未能建立，請稍後重試；已有賬戶不會被覆寫。' });
+          // Auth applies custom app metadata after its INSERT trigger. A
+          // successful provider response is insufficient until the profile is
+          // finalized. This also repairs an interrupted same-actor creation
+          // after the alias collision, without updating any provider password.
+          const finalized = await dependencies.finalize(student.username, actor);
+          if (finalized && (!created || finalized.id === created.id)) {
+            results.push({ ...student, status: created || finalized.provisioned ? 'created' : 'existing', id: finalized.id });
+          } else {
+            results.push({ ...student, status: 'error', message: '未能完成賬戶設定，請重新載入後重試；已有密碼不會被覆寫。' });
           }
         } catch {
           results.push({ ...student, status: 'error', message: '未能確認結果，請重新載入後重試；已有賬戶不會被覆寫。' });

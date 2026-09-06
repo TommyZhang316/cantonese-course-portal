@@ -4,7 +4,7 @@
 
 正式入口：[公益粵語課堂](https://tommyzhang316.github.io/cantonese-course-portal/)。師生操作見[入口使用指南](docs/USAGE.md)，後臺使用見[管理指南](docs/ADMIN.md)。
 
-2026年9月6日：「管理員批量建立學生帳戶」新版已發布，8課及52份私人材料保持，首位管理員已完成驗證及啟用。資料庫及帳戶服務已部署，正式公開入口檢查通過；正式測試學生的建立、改密碼及重設驗收仍待批准。教職員郵件服務仍待核對；學生帳戶流程不依賴寄信。進度與部署步驟見[DEPLOY.md](docs/DEPLOY.md)。
+2026年9月6日：「管理員批量建立學生帳戶」新版已發布，首位管理員已完成驗證及啟用。兩個合成學生已完成正式建立、首次改密碼、重名預覽、管理員重設及舊會話撤銷驗收，隨後清理；本階段8課及52份私人材料保持不變。教職員重設郵件仍待實際收信驗證；學生帳戶流程不依賴寄信。詳見[DEPLOY.md](docs/DEPLOY.md)。
 
 ## 已實作
 
@@ -46,11 +46,11 @@ npm run build
 npm run check:public
 ```
 
-本次本機驗證包括27項單元測試、45項SQL情境、16項帳戶Edge Function測試及9次無障礙掃描。它們不替代正式Auth、Storage、帳戶建立及SMTP的實際驗收，詳細限制見[VERIFICATION.md](docs/VERIFICATION.md)。
+本次本機驗證包括27項單元測試、49項SQL情境、18項帳戶Edge Function測試及9次無障礙掃描。新版正式學生帳戶驗收及清理另有50項檢查通過；SMTP及雙連線競態等未測範圍見[VERIFICATION.md](docs/VERIFICATION.md)。
 
 ## 部署及教材
 
-新版需要依序套用三份migration、部署`manage-accounts` Edge Function、在雲端關閉自行註冊，再發布前端。僅更新GitHub Pages不會自動套用後端設定。步驟見[DEPLOY.md](docs/DEPLOY.md)，權限設計見[security.md](docs/security.md)。
+新版需要依序套用四份migration、部署`manage-accounts` Edge Function、在雲端關閉自行註冊，再發布前端。僅更新GitHub Pages不會自動套用後端設定。步驟見[DEPLOY.md](docs/DEPLOY.md)，權限設計見[security.md](docs/security.md)。
 
 教材準備及分類見[materials.md](docs/materials.md)。`private-materials/`、`.local/`及`.env*`不應提交GitHub；公開設定範本`.env.example`除外。請只把本`portal/`目錄作為網站儲存庫，不要把上層教材文件夾公開。
 

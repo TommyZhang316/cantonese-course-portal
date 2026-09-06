@@ -21,7 +21,9 @@ GitHub Pages提供公開前端；Supabase伺服器驗證登入、角色、教材
 
 管理員在前端預覽姓名轉換結果，採普通話全拼音大寫、無空格、ü寫成V；姓名中的多音字由管理員核對。每批最多50位，同批重名加02、03，已有帳戶略過。預覽修正後交給`manage-accounts` Edge Function建立學生帳戶。
 
-函式使用服務端Auth Admin API設定受信任的`app_metadata`，資料庫trigger核對建立者是目前已啟用管理員，然後建立`student / approved / must_change_password=true`的profile。使用者可修改的`user_metadata`不能指定角色、啟用或免改密碼。未帶受信任管理資料的舊式建立流程仍只產生待核准學生，不能自行取得課程權限。
+函式使用服務端Auth Admin API設定受信任的`app_metadata`。正式Auth先插入使用者、後寫入此metadata，因此不能只依賴INSERT trigger宣稱帳戶已完成。Auth回應後，Edge呼叫僅服務端可用的`service_finalize_managed_account`，核對精確登入別名、已確認身份、可信metadata及原建立管理員，再原子完成`student / approved / must_change_password=true`的profile。使用者可修改的`user_metadata`不能指定角色、啟用或免改密碼。[Auth建立順序](https://github.com/supabase/auth/blob/master/internal/api/admin.go)
+
+finalizer只可補完未修改的初始待處理學生；既有角色、停用狀態、版本、改密碼狀態及Auth密碼均不會被重複建立覆寫。只有可信服務端可呼叫，瀏覽器的學生、老師及管理員均沒有此RPC執行權。未帶受信任管理資料的舊式建立流程仍只產生待核准學生。
 
 Supabase Auth內部使用固定登入別名，並非學生電郵。建立時不寄送驗證信，學生亦無須提供信箱。學生在Portal只需輸入拼音帳戶名稱；帳戶名稱建立後固定，不可自行替換登入別名。
 
@@ -51,7 +53,7 @@ Supabase Auth內部使用固定登入別名，並非學生電郵。建立時不�
 
 文件替換先上傳新隨機路徑，再更新資料記錄。舊路徑失去課程角色的下載資格，歷史路徑不能重新綁定。原檔仍在私人儲存內，專案擁有人可按備份安排處理。上傳成功但資料儲存失敗時，沒有教材記錄的孤立文件也不能由網站帳戶下載。
 
-本機匯入使用受信任的服務端憑證。第二份migration將它在課程資料表的直接權限限制為`resources`讀取／新增及`lessons`讀取／更新；不能藉此直接改帳戶或操作記錄。第三份migration只另授予完成帳戶重設的窄用途RPC。Supabase平台的Storage／Auth管理權限仍屬高權限，管理key只可留在受信任本機及Edge Function服務端，不能交給前端。
+本機匯入使用受信任的服務端憑證。第二份migration將它在課程資料表的直接權限限制為`resources`讀取／新增及`lessons`讀取／更新；不能藉此直接改帳戶或操作記錄。第三、第四份migration分別另授予完成帳戶重設及完成可信帳戶建立的窄用途RPC。Supabase平台的Storage／Auth管理權限仍屬高權限，管理key只可留在受信任本機及Edge Function服務端，不能交給前端。
 
 匯入先上傳私人文件、再新增教材記錄；已有教材ID略過。課表僅在初次占位狀態填入，以後的教材及發布安排由管理員在入口處理。
 
@@ -59,9 +61,9 @@ Supabase Auth內部使用固定登入別名，並非學生電郵。建立時不�
 
 ## 部署及驗證範圍
 
-新版須套用第三份migration、部署帳戶Edge Function、核對雲端關閉自行註冊並發布前端。詳細順序及正式環境驗收項目見[DEPLOY.md](DEPLOY.md)。
+新版須套用第三、第四份migration、部署配套帳戶Edge Function、核對雲端關閉自行註冊並發布前端。詳細順序及正式環境驗收項目見[DEPLOY.md](DEPLOY.md)。
 
-本次本機驗證包括27項單元測試、45項SQL情境、16項帳戶函式測試及9次無障礙掃描。SQL測試使用PGlite的PostgreSQL核心及最小Auth／Storage adapter，函式測試涵蓋權限、請求格式、部分失敗及重設流程。這些不替代真實Auth、JWT、Storage路由、撤銷session、並行操作或SMTP收信測試。2026年9月6日更新時，新版正式部署及驗收仍待完成，最新證據見[VERIFICATION.md](VERIFICATION.md)。
+本次本機驗證包括27項單元測試、49項SQL情境、18項帳戶函式測試及9次無障礙掃描。SQL測試使用PGlite的PostgreSQL核心及最小Auth／Storage adapter，並重現正式Auth的插入後metadata更新順序。2026年9月6日另已完成兩個合成學生的正式建立、首次改密碼、重名預覽、管理員重設、舊session撤銷及清理，共50項檢查通過。真實雙連線競態及SMTP重設郵件收信仍未驗證；詳見[VERIFICATION.md](VERIFICATION.md)。
 
 ## 設計依據
 

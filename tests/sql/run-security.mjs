@@ -284,6 +284,74 @@ try {
   });
   ids.managed = '10000000-0000-4000-8000-000000000101';
   ids.fakeManaged = '10000000-0000-4000-8000-000000000102';
+  ids.delayedManaged = '10000000-0000-4000-8000-000000000104';
+  await check('real Auth insert then app-metadata update is finalized before the account is reported ready', async () => {
+    await owner();
+    // Auth.adminUserCreate inserts provider metadata first, then updates custom
+    // app metadata and confirmation in the same provider transaction.
+    await db.exec('begin');
+    await query(`insert into auth.users(id,email,raw_user_meta_data,raw_app_meta_data,encrypted_password)
+      values ($1,'chenming@accounts.cantonese.invalid','{"display_name":"陳明"}','{"provider":"email"}',extensions.crypt('preserve-this-chosen-password',extensions.gen_salt('bf',4)))`,[ids.delayedManaged]);
+    await query('update auth.users set raw_app_meta_data=$2::jsonb,email_confirmed_at=now() where id=$1', [ids.delayedManaged,JSON.stringify({course_managed:true,course_username:'CHENMING',course_created_by:ids.admin})]);
+    await db.exec('commit');
+    assert.deepEqual(await query('select username,status,must_change_password from public.profiles where id=$1',[ids.delayedManaged]),[{username:null,status:'pending',must_change_password:false}]);
+    const originalHash = await scalar('select encrypted_password from auth.users where id=$1',[ids.delayedManaged]);
+    await importer();
+    const finished = await scalar("select public.service_finalize_managed_account('CHENMING',$1)",[ids.admin]);
+    assert.deepEqual(finished,{id:ids.delayedManaged,provisioned:true});
+    await owner();
+    assert.deepEqual(await query('select username,role,status,must_change_password from public.profiles where id=$1',[ids.delayedManaged]),[{username:'CHENMING',role:'student',status:'approved',must_change_password:true}]);
+    assert.equal(await scalar('select encrypted_password from auth.users where id=$1',[ids.delayedManaged]),originalHash);
+    await query('insert into auth.sessions(id,user_id) values ($1,$2)',[sessionId(ids.delayedManaged),ids.delayedManaged]);
+    await user('delayedManaged');
+    assert.equal(await scalar('select count(*)::integer from public.resources'),0);
+    await query('select public.complete_initial_password_change()');
+    const version = await scalar('select version from public.profiles');
+    await importer();
+    assert.deepEqual(await scalar("select public.service_finalize_managed_account('CHENMING',$1)",[ids.admin]),{id:ids.delayedManaged,provisioned:false});
+    await user('delayedManaged');
+    assert.equal(await scalar('select version from public.profiles'),version);
+    assert.equal(await scalar('select must_change_password from public.profiles'),false);
+    await owner();
+    assert.equal(await scalar('select encrypted_password from auth.users where id=$1',[ids.delayedManaged]),originalHash);
+    assert.equal(await scalar("select count(*)::integer from public.audit_log where action='create_managed_account' and entity_id=$1",[ids.delayedManaged]),1);
+  });
+  await check('trusted finalization is unavailable to every browser role and cannot target a nonadmin actor', async () => {
+    for (const name of ['anon','student','teacher','admin']) {
+      await user(name);
+      await rejects(() => query("select public.service_finalize_managed_account('CHENMING',$1)",[ids.admin]),'42501');
+    }
+    await importer();
+    await rejects(() => query("select public.service_finalize_managed_account('CHENMING',$1)",[ids.student]),'42501');
+    await rejects(() => query("select public.service_finalize_managed_account('bad-alias',$1)",[ids.admin]),'42501');
+    assert.equal(await scalar("select public.service_finalize_managed_account('MISSINGNAME',$1)",[ids.admin]),null);
+  });
+  await check('finalization rejects forged user metadata, unconfirmed identities, mismatched creators and edited pending profiles', async () => {
+    for (const [index, kind, code] of [[1,'user-metadata','42501'],[2,'unconfirmed','42501'],[3,'other-creator','23514'],[4,'edited-profile','23514']]) {
+      const id = `10000000-0000-4000-8000-${String(200+index).padStart(12,'0')}`;
+      const username = `GUARDCASE${index}`;
+      const metadata = {course_managed:true,course_username:username,course_created_by:kind === 'other-creator' ? ids.student : ids.admin};
+      await owner();
+      await query("insert into auth.users(id,email,raw_user_meta_data,encrypted_password) values ($1,$2,$3::jsonb,'unchanged-test-hash')",[id,`${username.toLowerCase()}@accounts.cantonese.invalid`,JSON.stringify({display_name:'測試',...metadata})]);
+      await query('update auth.users set raw_app_meta_data=$2::jsonb,email_confirmed_at=$3 where id=$1',[id,JSON.stringify(kind === 'user-metadata' ? {} : metadata),kind === 'unconfirmed' ? null : new Date().toISOString()]);
+      if (kind === 'edited-profile') await query("update public.profiles set status='suspended' where id=$1",[id]);
+      const before = await scalar('select to_jsonb(p) from public.profiles p where id=$1',[id]);
+      await importer();
+      await rejects(() => query('select public.service_finalize_managed_account($1,$2)',[username,ids.admin]),code);
+      await owner();
+      assert.deepEqual(await scalar('select to_jsonb(p) from public.profiles p where id=$1',[id]),before);
+      assert.equal(await scalar('select encrypted_password from auth.users where id=$1',[id]),'unchanged-test-hash');
+    }
+  });
+  await check('repeat finalization never reactivates a suspended completed account', async () => {
+    await owner();
+    await query("update public.profiles set status='suspended' where id=$1",[ids.delayedManaged]);
+    const before = await scalar('select to_jsonb(p) from public.profiles p where id=$1',[ids.delayedManaged]);
+    await importer();
+    assert.deepEqual(await scalar("select public.service_finalize_managed_account('CHENMING',$1)",[ids.admin]),{id:ids.delayedManaged,provisioned:false});
+    await owner();
+    assert.deepEqual(await scalar('select to_jsonb(p) from public.profiles p where id=$1',[ids.delayedManaged]),before);
+  });
   const managedInitial = "encode(extensions.digest('course-initial-v1:LIWU','sha256'),'hex')";
   const hashPassword = passwordSql => `extensions.crypt(${passwordSql},extensions.gen_salt('bf',4))`;
   const managedMetadata = { course_managed: true, course_username: 'LIWU', course_created_by: ids.admin };
