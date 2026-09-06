@@ -12,13 +12,16 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "test:security": "node tests/sql/run-security.mjs",
+    "test:accounts": "node tests/edge/run-managed-accounts.mjs",
     "check:public": "node scripts/assert-public-build.mjs",
     "prepare:materials": "python scripts/prepare-materials.py"
   },
   "dependencies": {
     "@fluentui/react-components": "9.74.7",
     "@phosphor-icons/react": "2.1.10",
+    "@pinyin-pro/data": "1.3.1",
     "@supabase/supabase-js": "2.115.0",
+    "pinyin-pro": "3.29.3",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },

@@ -28,6 +28,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: node tests/sql/run-security.mjs
+      - run: node tests/edge/run-managed-accounts.mjs
       - name: Verify deployment connection
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: node scripts/validate-web-config.mjs --required

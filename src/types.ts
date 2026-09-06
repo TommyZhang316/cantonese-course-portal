@@ -6,6 +6,8 @@ export type Category = 'notes' | 'slides' | 'activity' | 'game' | 'exam' | 'guid
 export interface Account {
   id: string;
   email: string;
+  username: string | null;
+  must_change_password: boolean;
   display_name: string;
   role: Role;
   status: AccountStatus;
@@ -57,19 +59,29 @@ export interface AuditEntry {
   detail: string;
 }
 
+export interface CreateAccountInput { name: string; username: string }
+export interface CreateAccountResult {
+  name: string;
+  username: string;
+  status: 'created' | 'existing' | 'error';
+  id?: string;
+  message?: string;
+}
+
 export interface PortalService {
   readonly configured: boolean;
   readonly demo: boolean;
   session(): Promise<Account | null>;
   onAuthChange(callback: () => void): () => void;
-  signIn(email: string, password: string): Promise<Account>;
-  signUp(name: string, email: string, password: string): Promise<void>;
+  signIn(identifier: string, password: string): Promise<Account>;
   signOut(): Promise<void>;
   requestPasswordReset(email: string): Promise<void>;
   updatePassword(password: string): Promise<void>;
   lessons(): Promise<Lesson[]>;
   resources(): Promise<Resource[]>;
   accounts(): Promise<Account[]>;
+  createAccounts(rows: CreateAccountInput[]): Promise<CreateAccountResult[]>;
+  resetInitialPassword(account: Account): Promise<void>;
   audit(): Promise<AuditEntry[]>;
   download(resource: Resource): Promise<void>;
   saveResource(input: ResourceInput, current?: Resource, file?: File): Promise<void>;

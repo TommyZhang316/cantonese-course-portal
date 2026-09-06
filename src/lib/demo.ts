@@ -1,4 +1,4 @@
-import type { Account, AccountStatus, AuditEntry, Lesson, PortalService, Resource, ResourceInput, Role } from '../types';
+import type { Account, AccountStatus, AuditEntry, CreateAccountResult, Lesson, PortalService, Resource, ResourceInput, Role } from '../types';
 
 // This module is dynamically imported only by a demo-mode build with ?demo=1.
 // All data is synthetic; no production account or course file is included.
@@ -27,12 +27,14 @@ export function createDemoService(): PortalService {
   const listeners = new Set<() => void>();
   let sequence = 1;
   const accounts: Account[] = [
-    { id: 'demo-admin', email: 'admin@course.invalid', display_name: '林老師', role: 'admin', status: 'active', version: 1, updated_at: STAMP },
-    { id: 'demo-teacher', email: 'teacher@course.invalid', display_name: '陳老師', role: 'teacher', status: 'active', version: 1, updated_at: STAMP },
-    { id: 'demo-student', email: 'student@course.invalid', display_name: '小晴', role: 'student', status: 'active', version: 1, updated_at: STAMP },
-    { id: 'demo-pending', email: 'pending@course.invalid', display_name: '新同學', role: 'student', status: 'pending', version: 1, updated_at: STAMP },
+    { id: 'demo-admin', username: null, must_change_password: false, email: 'admin@course.invalid', display_name: '林老師', role: 'admin', status: 'active', version: 1, updated_at: STAMP },
+    { id: 'demo-teacher', username: null, must_change_password: false, email: 'teacher@course.invalid', display_name: '陳老師', role: 'teacher', status: 'active', version: 1, updated_at: STAMP },
+    { id: 'demo-student', username: 'XIAOQING', must_change_password: false, email: 'student@course.invalid', display_name: '小晴', role: 'student', status: 'active', version: 1, updated_at: STAMP },
+    { id: 'demo-pending', username: null, must_change_password: false, email: 'pending@course.invalid', display_name: '新同學', role: 'student', status: 'pending', version: 1, updated_at: STAMP },
+    { id: 'demo-initial', username: 'LIWU', must_change_password: true, email: 'first@course.invalid', display_name: '李武（示範）', role: 'student', status: 'active', version: 1, updated_at: STAMP },
   ];
   const passwords = new Map(accounts.map(item => [item.id, DEMO_PASSWORD]));
+  passwords.set('demo-initial', 'LIWU');
   const lessons: Lesson[] = topics.map(([title, summary], index) => {
     const starts = new Date(`${classDates[index]}T18:00:00+08:00`);
     return { id: index + 1, title, summary, starts_at: starts.toISOString(), ends_at: new Date(starts.getTime() + 120 * 60_000).toISOString(),
@@ -64,11 +66,12 @@ export function createDemoService(): PortalService {
     const item = current();
     if (!item) throw new Error('請先登入示範賬戶。');
     if (item.status !== 'active') throw new Error(item.status === 'pending' ? '賬戶正在等候核准。' : '這個賬戶已停用。');
+    if (item.must_change_password) throw new Error('請先更改初始密碼。');
     if (admin && item.role !== 'admin') throw new Error('這項操作需要管理員權限。');
     return item;
   }
   function allowed(item: Resource, person: Account): boolean {
-    return person.status === 'active' && (person.role === 'admin' || (!item.archived_at && (person.role === 'teacher' || item.student_policy === 'immediate' || (item.student_policy === 'scheduled' && !!item.release_at && new Date(item.release_at).getTime() <= DEMO_NOW))));
+    return person.status === 'active' && !person.must_change_password && (person.role === 'admin' || (!item.archived_at && (person.role === 'teacher' || item.student_policy === 'immediate' || (item.student_policy === 'scheduled' && !!item.release_at && new Date(item.release_at).getTime() <= DEMO_NOW))));
   }
   function note(action: string, target_label: string, detail: string): void {
     audit.unshift({ id: `demo-audit-${sequence++}`, actor_name: current()?.display_name ?? '示範系統', action, target_label, detail, created_at: updated() });
@@ -86,18 +89,9 @@ export function createDemoService(): PortalService {
     session: async () => clone(current()),
     onAuthChange(callback) { listeners.add(callback); return () => listeners.delete(callback); },
     signIn: async (email, password) => {
-      const item = accounts.find(person => person.email.toLowerCase() === email.trim().toLowerCase());
+      const item = accounts.find(person => person.email.toLowerCase() === email.trim().toLowerCase() || person.username === email.trim().toUpperCase());
       if (!item || passwords.get(item.id) !== password) throw new Error('示範電郵或密碼不正確。示範密碼為 DemoOnly!2026。');
       selectedId = item.id; emit(); return clone(item);
-    },
-    signUp: async (name, email, password) => {
-      if (!name.trim()) throw new Error('請填寫稱呼。');
-      if (password.length < 12) throw new Error('請使用至少12字元的密碼。');
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('請填寫有效電郵。');
-      if (accounts.some(item => item.email.toLowerCase() === email.trim().toLowerCase())) throw new Error('這個示範電郵已經註冊。');
-      const person: Account = { id: `demo-created-${sequence++}`, email: email.trim(), display_name: name.trim().slice(0, 100), role: 'student', status: 'pending', version: 1, updated_at: updated() };
-      accounts.push(person); passwords.set(person.id, password);
-      note('申請賬戶', person.display_name, '示範申請已建立，等待管理員核准。沒有發送電郵。');
     },
     signOut: async () => { selectedId = null; emit(); },
     requestPasswordReset: async email => { if (!email.trim()) throw new Error('請填寫電郵。'); },
@@ -105,11 +99,34 @@ export function createDemoService(): PortalService {
       const item = current();
       if (!item) throw new Error('請先登入示範賬戶。');
       if (password.length < 12) throw new Error('請使用至少12字元的密碼。');
+      if (item.username && password.toUpperCase() === item.username) throw new Error('新密碼不可與帳戶名稱相同。');
       passwords.set(item.id, password);
+      item.must_change_password = false; item.version++; item.updated_at = updated();
     },
     lessons: async () => { requireActive(); return clone([...lessons].sort((a, b) => a.sort_order - b.sort_order)); },
     resources: async () => { const person = requireActive(); return clone(resources.filter(item => allowed(item, person))); },
     accounts: async () => { requireActive(true); return clone(accounts); },
+    createAccounts: async rows => {
+      requireActive(true);
+      if (!rows.length || rows.length > 50) throw new Error('每批請建立1至50個學生帳戶。');
+      return rows.map((row): CreateAccountResult => {
+        const existing = accounts.find(item => item.username === row.username);
+        if (existing) return { ...row, id: existing.id, status: 'existing', message: '帳戶已存在，沒有更改密碼。' };
+        if (!row.name.trim() || !/^[A-Z][A-Z0-9]{1,59}$/.test(row.username)) return { ...row, status: 'error', message: '請核對姓名及帳戶格式。' };
+        const person: Account = { id: `demo-created-${sequence++}`, username: row.username, must_change_password: true, email: `${row.username.toLowerCase()}@accounts.cantonese.invalid`, display_name: row.name, role: 'student', status: 'active', version: 1, updated_at: updated() };
+        accounts.push(person); passwords.set(person.id, row.username);
+        note('建立學生帳戶', row.name, '示範帳戶已建立，首次登入須更改密碼。');
+        return { ...row, id: person.id, status: 'created' };
+      });
+    },
+    resetInitialPassword: async supplied => {
+      const actor = requireActive(true);
+      const item = accounts.find(person => person.id === supplied.id);
+      if (!item || item.role !== 'student' || !item.username || item.id === actor.id) throw new Error('只能重設拼音學生帳戶。');
+      ensureVersion(item.version, supplied.version);
+      passwords.set(item.id, item.username); item.must_change_password = true; item.version++; item.updated_at = updated();
+      note('重設初始密碼', item.display_name, '下次登入須更改密碼。');
+    },
     audit: async () => { requireActive(true); return clone(audit); },
     download: async requested => {
       const person = requireActive();
@@ -151,6 +168,7 @@ export function createDemoService(): PortalService {
       const item = accounts.find(person => person.id === supplied.id);
       if (!item) throw new Error('找不到賬戶。');
       ensureVersion(item.version, supplied.version);
+      if (item.must_change_password && role !== 'student') throw new Error('請先完成首次更改密碼，再設定教職員權限。');
       if (item.role === 'admin' && item.status === 'active' && (role !== 'admin' || status !== 'active') && accounts.filter(person => person.role === 'admin' && person.status === 'active').length <= 1) throw new Error('必須保留至少一位已核准的管理員。請先指定另一位管理員。');
       item.role = role; item.status = status; item.version++; item.updated_at = updated();
       note('更新賬戶', item.display_name, `角色：${roleLabel[role]}；狀態：${statusLabel[status]}。`);

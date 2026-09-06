@@ -412,3 +412,61 @@ img { display: block; max-width: 100%; }
   .lesson-card:hover, .sidebar-link:hover, .lesson-nav:hover { outline: 1px solid Highlight; }
   .skeleton { border: 1px solid CanvasText; }
 }
+
+/* Batch account administration uses the existing course palette and Fluent controls. */
+.batch-accounts { margin: 26px 0 34px; padding: 24px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); min-width: 0; }
+.batch-accounts-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 21px; }
+.batch-accounts-heading h3 { font-size: 18px; margin-bottom: 6px; }
+.batch-accounts-heading p { font-size: 12px; color: var(--muted); margin: 0; }
+.batch-accounts-heading > svg { color: var(--accent); flex-shrink: 0; margin-top: 5px; }
+.batch-accounts-input { display: grid; gap: 16px; }
+.batch-accounts-input textarea { min-height: 124px; line-height: 1.8; }
+.batch-accounts-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 18px; }
+.batch-accounts-input .batch-accounts-actions { margin-top: 0; }
+.batch-accounts-actions > button { min-height: 38px; }
+.batch-accounts-actions .form-helper { flex-basis: 100%; overflow-wrap: anywhere; }
+.batch-accounts > .notice:last-child { margin: 18px 0 0; }
+.batch-accounts-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 18px; margin-bottom: 12px; font-size: 12px; }
+.batch-accounts-summary span { color: var(--muted); }
+.batch-accounts-preview { max-height: 560px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; scroll-padding: 16px; }
+.batch-accounts-rows { list-style: none; margin: 0; padding: 0; }
+.batch-accounts-row { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(180px, 1.5fr) minmax(135px, 1.1fr) 40px; align-items: start; gap: 16px; padding: 20px 16px; border-bottom: 1px solid var(--line); }
+.batch-accounts-row:last-child { border-bottom: 0; }
+.batch-accounts-row > * { min-width: 0; }
+.batch-accounts-name { overflow-wrap: anywhere; }
+.batch-accounts-number { display: block; color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; margin-bottom: 4px; }
+.batch-accounts-name strong { display: block; font-size: 14px; font-weight: 600; }
+.batch-accounts-name small { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
+.batch-accounts-row .fui-Field { font-size: 12px; }
+.batch-accounts-row .fui-Input { width: 100%; min-height: 36px; }
+.batch-accounts-row input { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12px; letter-spacing: .02em; min-width: 0; }
+.batch-accounts-password { display: flex; flex-direction: column; gap: 6px; font-size: 11px; padding-top: 2px; }
+.batch-accounts-password > span { color: var(--muted); }
+.batch-accounts-password code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12px; letter-spacing: .02em; overflow-wrap: anywhere; padding: 6px 0; }
+.batch-accounts-password small { font-size: 10px; color: var(--muted); }
+.batch-accounts-row > button { margin-top: 26px; min-width: 36px; }
+.batch-accounts-created { color: var(--accent); font-size: 10px; padding-top: 35px; }
+.batch-accounts-progress { padding: 16px 0 2px; }
+.batch-accounts-progress p { font-size: 12px; margin-bottom: 10px; }
+.batch-accounts-export { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--line); }
+.batch-accounts-export .notice { margin-bottom: 13px; }
+.batch-accounts-export .form-helper { display: block; margin-top: 8px; }
+.batch-accounts-manage-actions { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+@media (max-width: 1000px) {
+  .batch-accounts-row { grid-template-columns: minmax(90px, .8fr) minmax(150px, 1.2fr) 36px; gap: 12px; }
+  .batch-accounts-password { grid-column: 2; grid-row: 2; padding-top: 0; }
+  .batch-accounts-password code { padding: 0; }
+  .batch-accounts-row > button, .batch-accounts-created { grid-column: 3; grid-row: 1; }
+}
+@media (max-width: 640px) {
+  .batch-accounts { padding: 18px 14px; margin-top: 22px; }
+  .batch-accounts-heading h3 { font-size: 16px; }
+  .batch-accounts-row { grid-template-columns: minmax(0, 1fr) 36px; padding: 18px 12px; gap: 12px; }
+  .batch-accounts-name { grid-column: 1; }
+  .batch-accounts-number { display: inline; margin-right: 8px; }
+  .batch-accounts-name strong { display: inline; }
+  .batch-accounts-row .fui-Field, .batch-accounts-password { grid-column: 1 / -1; grid-row: auto; }
+  .batch-accounts-row > button, .batch-accounts-created { grid-column: 2; grid-row: 1; margin: 0; padding-top: 0; }
+  .batch-accounts-preview { max-height: 600px; }
+  .batch-accounts-actions > button, .batch-accounts-export > button { width: 100%; }
+}

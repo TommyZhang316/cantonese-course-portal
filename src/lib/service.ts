@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { Account, AccountStatus, AuditEntry, Category, Lesson, PortalService, Resource, ResourceInput, Role } from '../types';
+import type { Account, AccountStatus, AuditEntry, Category, CreateAccountResult, Lesson, PortalService, Resource, ResourceInput, Role } from '../types';
+import { initialPasswordTransport, loginCredentials } from './login';
 
 const BUCKET = 'course-materials';
 const LOCATION = '香港西營盤干諾道西148號成基商業中心2301室';
@@ -24,7 +25,8 @@ function translated(error: unknown): Error {
     return new PortalError('資料格式不完整或不符合要求。請檢查標題、文件大小及公開時間。');
   }
   if (['22023', '22P02', '23502', '22007', '22008'].includes(code)) return new PortalError('請檢查必填資料、日期及時間是否正確。');
-  if (code === 'invalid_credentials') return new PortalError('電郵或密碼不正確，請再試一次。');
+  if (code === 'invalid_credentials') return new PortalError('帳戶名稱／電郵或密碼不正確，請再試一次。');
+  if (code === 'same_password') return new PortalError('請選擇與目前密碼不同的新密碼。');
   if (code === 'email_not_confirmed') return new PortalError('請先開啟驗證電郵並完成驗證，再登入。');
   if (['over_email_send_rate_limit', 'over_request_rate_limit', 'over_email_send_rate_limit'].includes(code) || value?.status === 429) return new PortalError('操作太頻密，請稍後再試。若已要求電郵，請先檢查收件匣及垃圾郵件。');
   if (code === 'weak_password') return new PortalError('請使用至少12字元的密碼，並加入大小寫字母及數字。');
@@ -36,7 +38,7 @@ function translated(error: unknown): Error {
 async function handled<T>(work: () => Promise<T>): Promise<T> { try { return await work(); } catch (error) { throw translated(error); } }
 
 function account(row: Record<string, unknown>): Account {
-  return { id: String(row.id), email: String(row.email ?? ''), display_name: String(row.display_name ?? ''), role: row.role as Role,
+  return { id: String(row.id), email: String(row.email ?? ''), username: row.username ? String(row.username) : null, must_change_password: row.must_change_password === true, display_name: String(row.display_name ?? ''), role: row.role as Role,
     status: row.status === 'approved' ? 'active' : row.status as AccountStatus, updated_at: String(row.updated_at), version: Number(row.version) };
 }
 function lesson(row: Record<string, unknown>): Lesson {
@@ -72,9 +74,9 @@ function saveBlob(blob: Blob, filename: string): void {
 
 function unavailable(): PortalService {
   const reject = async (): Promise<never> => fail('網站尚未完成連線設定，請聯絡課程管理員。');
-  return { configured: false, demo: false, session: async () => null, onAuthChange: () => () => {}, signIn: reject, signUp: reject, signOut: reject,
+  return { configured: false, demo: false, session: async () => null, onAuthChange: () => () => {}, signIn: reject, signOut: reject,
     requestPasswordReset: reject, updatePassword: reject, lessons: reject, resources: reject, accounts: reject, audit: reject,
-    download: reject, saveResource: reject, archiveResource: reject, updateAccount: reject, updateLesson: reject };
+    download: reject, saveResource: reject, archiveResource: reject, updateAccount: reject, updateLesson: reject, createAccounts: reject, resetInitialPassword: reject };
 }
 
 function connected(client: SupabaseClient): PortalService {
@@ -92,8 +94,22 @@ function connected(client: SupabaseClient): PortalService {
     const user = await current();
     if (!user) fail('請先登入，再使用課程資料。');
     if (user.status !== 'active') fail(user.status === 'pending' ? '賬戶正在等候核准，請稍後再查看。' : '這個賬戶已停用，請聯絡課程管理員。');
+    if (user.must_change_password) fail('請先更改初始密碼，再使用課程材料。');
     if (admin && user.role !== 'admin') fail('這項操作需要管理員權限。');
     return user;
+  }
+  async function accountOperation(body: Record<string, unknown>) {
+    const result = await client.functions.invoke('manage-accounts', { body });
+    if (result.error) {
+      const context = result.error.context as Response | undefined;
+      if (context?.status === 409) fail('帳戶資料已變更或重設仍在處理。請重新整理帳戶清單後再試。');
+      if (context?.status === 401) fail('登入已過期，請重新登入。');
+      if (context?.status === 403) fail('你目前沒有管理員權限，請重新登入核對。');
+      if (context?.status === 503) fail('帳戶服務暫時未能完成操作。請先重新整理核對結果；重設失敗時可在五分鐘後再試。');
+      if (context?.status === 400) fail('請核對學生姓名及大寫拼音帳戶，每批最多50人。');
+      throw result.error;
+    }
+    return result.data;
   }
   const service: PortalService = {
     configured: true, demo: false,
@@ -113,28 +129,32 @@ function connected(client: SupabaseClient): PortalService {
       });
       return () => { subscribed = false; data.subscription.unsubscribe(); };
     },
-    signIn: (email, password) => handled(async () => {
-      const result = await client.auth.signInWithPassword({ email: email.trim(), password });
+    signIn: (identifier, password) => handled(async () => {
+      let credentials;
+      try { credentials = await loginCredentials(identifier, password); } catch { fail('請輸入管理員提供的帳戶名稱，或已登記的電郵。'); }
+      const result = await client.auth.signInWithPassword(credentials);
       if (result.error) throw result.error;
       const user = await current();
       if (!user) fail('未能取得賬戶資料，請重新登入。');
       return user;
     }),
-    signUp: (name, email, password) => handled(async () => {
-      if (!name.trim()) fail('請填寫稱呼。');
-      if (password.length < 12) fail('請使用至少12字元的密碼。');
-      const result = await client.auth.signUp({ email: email.trim(), password, options: { data: { display_name: name.trim().slice(0, 100) }, emailRedirectTo: window.location.origin + window.location.pathname } });
-      if (result.error) throw result.error;
-    }),
     signOut: () => handled(async () => { const result = await client.auth.signOut(); if (result.error) throw result.error; }),
     requestPasswordReset: email => handled(async () => {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || email.trim().toLowerCase().endsWith('@accounts.cantonese.invalid')) fail('拼音帳戶請聯絡課程管理員重設密碼。');
       const result = await client.auth.resetPasswordForEmail(email.trim(), { redirectTo: `${window.location.origin}${window.location.pathname}?recovery=1` });
       if (result.error) throw result.error;
     }),
     updatePassword: password => handled(async () => {
       if (password.length < 12) fail('請使用至少12字元的密碼。');
+      const user = await current();
+      if (!user) fail('請先登入，或重新開啟密碼重設連結。');
+      if (user.username && (password.toUpperCase() === user.username || password === await initialPasswordTransport(user.username))) fail('新密碼不可與帳戶名稱或初始密碼相同。');
       const result = await client.auth.updateUser({ password });
-      if (result.error) throw result.error;
+      if (result.error && !(user.must_change_password && result.error.code === 'same_password')) throw result.error;
+      if (user.must_change_password) {
+        const completed = await client.rpc('complete_initial_password_change');
+        if (completed.error) throw completed.error;
+      }
     }),
     lessons: () => handled(async () => {
       await active();
@@ -154,6 +174,22 @@ function connected(client: SupabaseClient): PortalService {
       if (result.error) throw result.error;
       return (result.data ?? []).map(account);
     }),
+    createAccounts: rows => handled(async () => {
+      await active(true);
+      if (!rows.length || rows.length > 50) fail('每批請建立1至50個學生帳戶。');
+      const data = await accountOperation({ action: 'create', students: rows });
+      if (!data || !Array.isArray(data.results)) fail('未能確認帳戶建立結果，請重新載入帳戶清單核對後再試。');
+      const known = new Set(rows.map(row => row.username));
+      const results = data.results as CreateAccountResult[];
+      if (results.length !== rows.length || results.some(row => !known.has(row.username) || !['created','existing','error'].includes(row.status))) fail('帳戶結果不完整，請重新載入帳戶清單核對。');
+      return results;
+    }),
+    resetInitialPassword: item => handled(async () => {
+      await active(true);
+      if (!item.username || item.role !== 'student') fail('這項重設只適用於管理員建立的學生帳戶。');
+      const data = await accountOperation({ action: 'reset', id: item.id, expected_version: item.version });
+      if (data?.status !== 'reset' || data.id !== item.id) fail('未能確認重設結果，請重新載入帳戶清單。');
+    }),
     audit: () => handled(async () => {
       await active(true);
       const [logs, profiles] = await Promise.all([client.from('audit_log').select('*').order('created_at', { ascending: false }).limit(100), client.from('profiles').select('id,display_name')]);
@@ -170,9 +206,12 @@ function connected(client: SupabaseClient): PortalService {
         let action = '更新資料';
         if (row.entity_type === 'profiles') {
           action = '更新賬戶';
+          const managedActions: Record<string,string> = { create_managed_account: '建立學生帳戶', begin_account_reset: '開始重設密碼', finish_account_reset: '已重設初始密碼', fail_account_reset: '密碼重設未完成' };
+          action = managedActions[row.action] ?? action;
           if (before.role !== after.role) changes.push(`角色：${roleNames[String(before.role)] ?? '未設定'} → ${roleNames[String(after.role)] ?? '未設定'}`);
           if (before.status !== after.status) changes.push(`狀態：${statusNames[String(before.status)] ?? '未設定'} → ${statusNames[String(after.status)] ?? '未設定'}`);
           if (before.email !== after.email) changes.push('電郵已更新');
+          if (before.must_change_password !== after.must_change_password && typeof after.must_change_password === 'boolean') changes.push(after.must_change_password ? '下次登入須更改密碼' : '已完成首次密碼設定');
         } else if (row.entity_type === 'resources') {
           action = row.action === 'insert' ? '新增資料' : '更新資料';
           if (!before.archived_at && after.archived_at) action = '封存資料';
