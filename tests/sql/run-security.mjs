@@ -397,9 +397,53 @@ try {
     await user('anon');
     await rejects(() => query('select public.complete_initial_password_change()'), '42501');
   });
-  await check('approved admin cannot rename or promote a student still using initial credentials', async () => {
-    await user('admin');
-    await rejects(() => profile('managed',1,'teacher','approved'), '23514');
+  await check('approved admin can assign roles before first login without unlocking initial credentials', async () => {
+    await owner();
+    ids.roleSetup='10000000-0000-4000-8000-000000000900';
+    try {
+      await query(`insert into auth.users(id,email,email_confirmed_at,raw_user_meta_data,raw_app_meta_data,encrypted_password)
+        values($1,'maaan@accounts.cantonese.invalid',now(),'{"display_name":"Role setup fixture"}',$2::jsonb,${hashPassword("encode(extensions.digest('course-initial-v1:MAAAN','sha256'),'hex')")})`,
+        [ids.roleSetup,JSON.stringify({...managedMetadata,course_username:'MAAAN'})]);
+      await query('insert into auth.sessions(id,user_id) values($1,$2)',[sessionId(ids.roleSetup),ids.roleSetup]);
+      await user('admin');
+      const teacher=await profile('roleSetup',1,'teacher','approved');
+      assert.equal(teacher.role,'teacher');
+      assert.equal(teacher.must_change_password,true);
+      await user('roleSetup');
+      for(const table of ['resources','lessons','storage.objects']) assert.equal(await scalar(`select count(*)::integer from ${table}`),0);
+      await rejects(()=>profile('student',1,'admin','approved'),'42501');
+      await rejects(()=>query('select public.complete_initial_password_change()'),'23514');
+      await user('admin');
+      const administrator=await profile('roleSetup',teacher.version,'admin','approved');
+      assert.equal(administrator.must_change_password,true);
+      const currentAdminVersion=await scalar('select version from public.profiles where id=$1',[ids.admin]);
+      assert.equal(await scalar("select count(*)::integer from public.profiles where role='admin' and status='approved'"),2);
+      await rejects(()=>profile('admin',currentAdminVersion,'teacher','approved'),'23514');
+      await rejects(()=>profile('admin',currentAdminVersion,'admin','suspended'),'23514');
+      await user('roleSetup');
+      assert.equal(await scalar('select portal_private.is_admin()'),false);
+      await rejects(()=>profile('student',1,'admin','approved'),'42501');
+      assert.equal(await scalar('select count(*)::integer from public.resources'),0);
+      await owner();
+      await query(`update auth.users set encrypted_password=${hashPassword("'abcxyz'")} where id=$1`,[ids.roleSetup]);
+      await user('roleSetup');
+      const completed=await scalar('select to_jsonb(public.complete_initial_password_change())');
+      assert.equal(completed.must_change_password,false);
+      assert.equal(completed.role,'admin');
+      assert.equal(await scalar('select portal_private.is_admin()'),true);
+      assert.equal(await scalar('select count(*)::integer from public.resources where id=$1',[staff.id]),1);
+      await user('admin');
+      const suspended=await profile('roleSetup',completed.version,'teacher','suspended');
+      await user('roleSetup');
+      assert.equal(await scalar('select count(*)::integer from public.resources'),0);
+      await user('admin');
+      const restored=await profile('roleSetup',suspended.version,'student','approved');
+      assert.equal(restored.must_change_password,false);
+      await user('roleSetup');
+      assert.equal(await scalar('select count(*)::integer from public.resources where id=$1',[staff.id]),0);
+    } finally { await owner(); await query('delete from auth.users where id=$1',[ids.roleSetup]); }
+  });
+  await check('managed login names remain immutable while roles can change', async () => {
     await owner();
     await rejects(() => query("update public.profiles set username='RENAMED' where id=$1",[ids.managed]), '23514');
     await rejects(() => query("update auth.users set email='new@example.invalid' where id=$1",[ids.managed]), '23514');

@@ -98,7 +98,7 @@ export function createDemoService(): PortalService {
     updatePassword: async password => {
       const item = current();
       if (!item) throw new Error('請先登入示範賬戶。');
-      if (password.length < 12) throw new Error('請使用至少12字元的密碼。');
+      if (password.length < 6) throw new Error('請使用至少6字元的密碼。');
       if (item.username && password.toUpperCase() === item.username) throw new Error('新密碼不可與帳戶名稱相同。');
       passwords.set(item.id, password);
       item.must_change_password = false; item.version++; item.updated_at = updated();
@@ -168,8 +168,7 @@ export function createDemoService(): PortalService {
       const item = accounts.find(person => person.id === supplied.id);
       if (!item) throw new Error('找不到賬戶。');
       ensureVersion(item.version, supplied.version);
-      if (item.must_change_password && role !== 'student') throw new Error('請先完成首次更改密碼，再設定教職員權限。');
-      if (item.role === 'admin' && item.status === 'active' && (role !== 'admin' || status !== 'active') && accounts.filter(person => person.role === 'admin' && person.status === 'active').length <= 1) throw new Error('必須保留至少一位已核准的管理員。請先指定另一位管理員。');
+      if (item.role === 'admin' && item.status === 'active' && !item.must_change_password && (role !== 'admin' || status !== 'active') && accounts.filter(person => person.role === 'admin' && person.status === 'active' && !person.must_change_password).length <= 1) throw new Error('必須保留至少一位已核准的管理員。請先指定另一位管理員。');
       item.role = role; item.status = status; item.version++; item.updated_at = updated();
       note('更新賬戶', item.display_name, `角色：${roleLabel[role]}；狀態：${statusLabel[status]}。`);
     },

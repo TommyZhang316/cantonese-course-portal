@@ -29,13 +29,34 @@ function translated(error: unknown): Error {
   if (code === 'same_password') return new PortalError('請選擇與目前密碼不同的新密碼。');
   if (code === 'email_not_confirmed') return new PortalError('請先開啟驗證電郵並完成驗證，再登入。');
   if (['over_email_send_rate_limit', 'over_request_rate_limit', 'over_email_send_rate_limit'].includes(code) || value?.status === 429) return new PortalError('操作太頻密，請稍後再試。若已要求電郵，請先檢查收件匣及垃圾郵件。');
-  if (code === 'weak_password') return new PortalError('請使用至少12字元的密碼，並加入大小寫字母及數字。');
+  if (code === 'weak_password') return new PortalError('請使用至少6字元的密碼。');
   if (code === 'user_already_exists') return new PortalError('這個電郵可能已經註冊。請嘗試登入或重設密碼。');
   if (['session_not_found', 'refresh_token_not_found', 'refresh_token_already_used', 'bad_jwt', 'user_not_found'].includes(code) || value?.status === 401) return new PortalError('登入已過期，請重新登入。');
   if (error instanceof TypeError || /fetch|network|connection|timeout/i.test(value?.message ?? '')) return new PortalError('暫時無法連線，請檢查網絡後再試。');
   return new PortalError('暫時未能完成操作，請稍後再試。若持續出現，請聯絡課程管理員。');
 }
 async function handled<T>(work: () => Promise<T>): Promise<T> { try { return await work(); } catch (error) { throw translated(error); } }
+
+function accountUpdateError(error: unknown): Error {
+  const value = error as { code?: string; message?: string; status?: number } | null;
+  if (value?.code === '23514') {
+    // Only map known account constraints. Never expose arbitrary database messages
+    // or reuse the materials form's title, file-size and release-date guidance.
+    const constraints: Record<string, string> = {
+      '必須保留至少一位已核准的管理員。': '必須保留至少一位已啟用的管理員。請先指定另一位管理員。',
+      '請先完成電郵驗證，然後再核准賬戶。': '這個賬戶尚未完成電郵驗證。請先完成驗證，再啟用賬戶。',
+      '登入賬戶名稱建立後不可更改。': '帳戶名稱建立後不可更改。請保留原有帳戶名稱，再更新權限或狀態。',
+      '由後臺建立的賬戶使用固定登入名稱。': '帳戶名稱建立後不可更改。請保留原有帳戶名稱，再更新權限或狀態。',
+      '請先完成首次更改密碼，再提升賬戶角色。': '這個賬戶尚未完成首次更改密碼。請先完成密碼設定，再更新權限。',
+    };
+    const message = value.message ?? '';
+    return new PortalError(Object.hasOwn(constraints, message) ? constraints[message] : '未能更新這個賬戶的權限或狀態。請重新載入帳戶清單，核對設定後再試。');
+  }
+  if (value?.code === 'P0002' || value?.status === 404) return new PortalError('找不到這個賬戶。請重新載入帳戶清單。');
+  if (value?.code === '23505') return new PortalError('帳戶資料與現有賬戶重複。請重新載入帳戶清單，核對後再試。');
+  if (['22023', '22P02', '23502'].includes(value?.code ?? '')) return new PortalError('請選擇有效的賬戶權限及狀態，再重新儲存。');
+  return translated(error);
+}
 
 function account(row: Record<string, unknown>): Account {
   return { id: String(row.id), email: String(row.email ?? ''), username: row.username ? String(row.username) : null, must_change_password: row.must_change_password === true, display_name: String(row.display_name ?? ''), role: row.role as Role,
@@ -145,7 +166,7 @@ function connected(client: SupabaseClient): PortalService {
       if (result.error) throw result.error;
     }),
     updatePassword: password => handled(async () => {
-      if (password.length < 12) fail('請使用至少12字元的密碼。');
+      if (password.length < 6) fail('請使用至少6字元的密碼。');
       const user = await current();
       if (!user) fail('請先登入，或重新開啟密碼重設連結。');
       if (user.username && (password.toUpperCase() === user.username || password === await initialPasswordTransport(user.username))) fail('新密碼不可與帳戶名稱或初始密碼相同。');
@@ -271,7 +292,7 @@ function connected(client: SupabaseClient): PortalService {
     updateAccount: (item, role, status) => handled(async () => {
       await active(true);
       const result = await client.rpc('admin_update_profile', { p_profile_id: item.id, p_expected_version: item.version, p_role: role, p_status: status === 'active' ? 'approved' : status });
-      if (result.error) throw result.error;
+      if (result.error) throw accountUpdateError(result.error);
     }),
     updateLesson: (item, input) => handled(async () => {
       await active(true);
